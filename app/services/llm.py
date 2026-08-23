@@ -1,6 +1,7 @@
 import json
 import logging
 import re
+import time
 from time import perf_counter
 from typing import List
 
@@ -555,21 +556,21 @@ def generate_script(
                 response = _generate_response(prompt=prompt)
             else:
                 response = _generate_response(prompt=prompt, app_config=app_config)
-            if response:
+            if response and not response.startswith("Error:"):
                 final_script = format_response(response)
+                # Some upstream providers may return quota errors as plain text.
+                if final_script and "当日额度已消耗完" in final_script:
+                    raise ValueError(final_script)
+                if final_script:
+                    break
             else:
-                logging.error("gpt returned an empty response")
-
-            # Some upstream providers may return quota errors as plain text.
-            if final_script and "当日额度已消耗完" in final_script:
-                raise ValueError(final_script)
-
-            if final_script:
-                break
+                final_script = response or ""
+                logger.warning(f"LLM attempt {i + 1} failed: {response}")
         except Exception as e:
             logger.error(f"failed to generate script: {e}")
 
-        if i < _max_retries:
+        if i < _max_retries - 1:
+            time.sleep(2 * (i + 1))
             logger.warning(f"failed to generate video script, trying again... {i + 1}")
     if "Error: " in final_script:
         logger.error(f"failed to generate video script: {final_script}")
