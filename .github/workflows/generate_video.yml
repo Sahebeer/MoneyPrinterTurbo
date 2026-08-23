@@ -1,0 +1,178 @@
+name: Generate & Publish Video
+
+on:
+  workflow_dispatch:
+    inputs:
+      video_subject:
+        description: "Video Subject / Topic (used to generate script with Groq LLM)"
+        required: false
+        default: "Top 5 AI tools that will save you hours"
+        type: string
+      video_script:
+        description: "Custom Script (leave empty to generate automatically via LLM)"
+        required: false
+        default: ""
+        type: string
+      video_language:
+        description: "Video Language"
+        required: false
+        default: "en-US"
+        type: string
+      voice_name:
+        description: "TTS Voice Name (e.g. en-US-JennyNeural, en-US-GuyNeural, zh-CN-XiaoxiaoNeural-Female)"
+        required: false
+        default: "en-US-JennyNeural"
+        type: string
+      video_aspect:
+        description: "Video Aspect Ratio"
+        required: false
+        default: "9:16"
+        type: choice
+        options:
+          - "9:16"
+          - "16:9"
+          - "1:1"
+      video_source:
+        description: "Stock Media Provider"
+        required: false
+        default: "pexels"
+        type: choice
+        options:
+          - "pexels"
+          - "pixabay"
+      paragraph_number:
+        description: "Number of script paragraphs (1-10)"
+        required: false
+        default: "2"
+        type: string
+      youtube_privacy:
+        description: "YouTube Privacy Status"
+        required: false
+        default: "unlisted"
+        type: choice
+        options:
+          - "unlisted"
+          - "public"
+          - "private"
+
+  # Uncomment below if you want to run this automatically on a schedule (e.g. daily at 09:00 UTC)
+  # schedule:
+  #   - cron: '0 9 * * *'
+
+jobs:
+  generate:
+    name: Generate Video and Publish
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install system dependencies (FFmpeg, ImageMagick, Fonts)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ffmpeg imagemagick fonts-noto fonts-noto-cjk fonts-noto-color-emoji
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+
+      - name: Install Python dependencies
+        run: uv sync --frozen --python 3.11
+
+      - name: Write config.toml from template + secrets
+        run: python scripts/apply_secrets.py
+        env:
+          GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+          PEXELS_API_KEY: ${{ secrets.PEXELS_API_KEY }}
+          PIXABAY_API_KEY: ${{ secrets.PIXABAY_API_KEY }}
+          UPLOAD_POST_API_KEY: ${{ secrets.UPLOAD_POST_API_KEY }}
+          UPLOAD_POST_USERNAME: ${{ secrets.UPLOAD_POST_USERNAME }}
+
+      - name: Generate Video
+        run: |
+          ARGS=()
+
+          if [ -n "${{ inputs.video_script }}" ]; then
+            ARGS+=(--video-script "${{ inputs.video_script }}")
+          else
+            SUBJECT="${{ inputs.video_subject }}"
+            # Default fallback for scheduled runs where inputs may be empty
+            if [ -z "$SUBJECT" ]; then
+              SUBJECT="Top 5 AI tools that will save you hours"
+            fi
+            ARGS+=(--video-subject "$SUBJECT")
+          fi
+
+          if [ -n "${{ inputs.video_language }}" ]; then
+            ARGS+=(--video-language "${{ inputs.video_language }}")
+          fi
+
+          if [ -n "${{ inputs.voice_name }}" ]; then
+            ARGS+=(--voice-name "${{ inputs.voice_name }}")
+          fi
+
+          if [ -n "${{ inputs.video_aspect }}" ]; then
+            ARGS+=(--video-aspect "${{ inputs.video_aspect }}")
+          fi
+
+          if [ -n "${{ inputs.video_source }}" ]; then
+            ARGS+=(--video-source "${{ inputs.video_source }}")
+          fi
+
+          if [ -n "${{ inputs.paragraph_number }}" ]; then
+            ARGS+=(--paragraph-number "${{ inputs.paragraph_number }}")
+          fi
+
+          echo "Running CLI with arguments: ${ARGS[@]}"
+          uv run --no-sync python cli.py "${ARGS[@]}"
+
+      - name: Locate generated video
+        id: video
+        run: |
+          FILE=$(find storage -name "final-*.mp4" -o -name "*.mp4" 2>/dev/null | head -n 1)
+          if [ -z "$FILE" ]; then
+            echo "::error::No generated mp4 video found under storage/"
+            exit 1
+          fi
+          echo "Found video: $FILE"
+          echo "path=$FILE" >> "$GITHUB_OUTPUT"
+
+      - name: Upload directly to YouTube
+        if: env.YT_REFRESH_TOKEN != ''
+        run: |
+          SUBJECT="${{ inputs.video_subject }}"
+          if [ -z "$SUBJECT" ]; then
+            SUBJECT="Top 5 AI tools that will save you hours"
+          fi
+          PRIVACY="${{ inputs.youtube_privacy }}"
+          if [ -z "$PRIVACY" ]; then
+            PRIVACY="unlisted"
+          fi
+
+          uv run --no-sync python scripts/youtube_upload.py \
+            --file "${{ steps.video.outputs.path }}" \
+            --title "$SUBJECT" \
+            --privacy "$PRIVACY"
+        env:
+          YT_CLIENT_ID: ${{ secrets.YT_CLIENT_ID }}
+          YT_CLIENT_SECRET: ${{ secrets.YT_CLIENT_SECRET }}
+          YT_REFRESH_TOKEN: ${{ secrets.YT_REFRESH_TOKEN }}
+
+      - name: Upload Generated Videos & Logs
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: generated-videos
+          path: |
+            storage/tasks/**/final-*.mp4
+            storage/tasks/**/video.mp4
+            storage/tasks/**/task.json
+          retention-days: 14
