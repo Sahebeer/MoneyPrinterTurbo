@@ -4,9 +4,9 @@ on:
   workflow_dispatch:
     inputs:
       video_subject:
-        description: "Video Subject / Topic (used to generate script with Groq LLM)"
+        description: "Video Subject / Topic (leave blank for AI unique topic generation)"
         required: false
-        default: "Top 5 AI tools that will save you hours"
+        default: ""
         type: string
       video_script:
         description: "Custom Script (leave empty to generate automatically via LLM)"
@@ -64,6 +64,8 @@ jobs:
     name: Generate Video and Publish
     runs-on: ubuntu-latest
     timeout-minutes: 45
+    permissions:
+      contents: write
 
     steps:
       - name: Check out repository
@@ -100,6 +102,14 @@ jobs:
           UPLOAD_POST_API_KEY: ${{ secrets.UPLOAD_POST_API_KEY }}
           UPLOAD_POST_USERNAME: ${{ secrets.UPLOAD_POST_USERNAME }}
 
+      - name: Select or Generate Unique Topic
+        id: topic
+        run: |
+          uv run --no-sync python scripts/generate_topic.py --input-subject "${{ inputs.video_subject }}"
+        env:
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+
       - name: Generate Video
         run: |
           ARGS=()
@@ -107,12 +117,7 @@ jobs:
           if [ -n "${{ inputs.video_script }}" ]; then
             ARGS+=(--video-script "${{ inputs.video_script }}")
           else
-            SUBJECT="${{ inputs.video_subject }}"
-            # Default fallback for scheduled runs where inputs may be empty
-            if [ -z "$SUBJECT" ]; then
-              SUBJECT="Top 5 AI tools that will save you hours"
-            fi
-            ARGS+=(--video-subject "$SUBJECT")
+            ARGS+=(--video-subject "${{ steps.topic.outputs.subject }}")
           fi
 
           if [ -n "${{ inputs.video_language }}" ]; then
@@ -152,10 +157,6 @@ jobs:
       - name: Upload directly to YouTube
         if: env.YT_REFRESH_TOKEN != ''
         run: |
-          SUBJECT="${{ inputs.video_subject }}"
-          if [ -z "$SUBJECT" ]; then
-            SUBJECT="Top 5 AI tools that will save you hours"
-          fi
           PRIVACY="${{ inputs.youtube_privacy }}"
           if [ -z "$PRIVACY" ]; then
             PRIVACY="unlisted"
@@ -163,12 +164,23 @@ jobs:
 
           uv run --no-sync python scripts/youtube_upload.py \
             --file "${{ steps.video.outputs.path }}" \
-            --title "$SUBJECT" \
+            --title "${{ steps.topic.outputs.subject }}" \
             --privacy "$PRIVACY"
         env:
           YT_CLIENT_ID: ${{ secrets.YT_CLIENT_ID }}
           YT_CLIENT_SECRET: ${{ secrets.YT_CLIENT_SECRET }}
           YT_REFRESH_TOKEN: ${{ secrets.YT_REFRESH_TOKEN }}
+
+      - name: Save used topics history to repository
+        if: always()
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add data/used_topics.json data/topics_queue.txt 2>/dev/null || true
+          if ! git diff --staged --quiet; then
+            git commit -m "chore: record used video topic [skip ci]"
+            git push origin main || true
+          fi
 
       - name: Upload Generated Videos & Logs
         uses: actions/upload-artifact@v4
