@@ -1,6 +1,5 @@
 # Add optional topics here, one per line.
 # If this file has lines, the workflow will consume them one by one.
 # If empty, AI (Gemini) will automatically generate a fresh, unique viral topic!
-The Most Dangerous AI Technology Invented This Year
 3 AI Websites That Feel Illegal to Know
 How Quantum Computing Will Break All Encryption
