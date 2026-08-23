@@ -1,3 +1,4 @@
+import json
 import math
 import os
 import re
@@ -611,6 +612,54 @@ def generate_subtitle(task_id, params, video_script, sub_maker, audio_file):
     return subtitle_path
 
 
+def _is_visual_engine_enabled(params: VideoParams) -> bool:
+    """
+    Checks whether the Semantic Visual Engine is enabled for this task,
+    checking params.visual_engine_enabled first, then config.app['visual_engine']['enabled'].
+    """
+    param_override = getattr(params, "visual_engine_enabled", None)
+    if param_override is not None:
+        return bool(param_override)
+    cfg = config.app.get("visual_engine", {})
+    if isinstance(cfg, dict):
+        return bool(cfg.get("enabled", False))
+    return False
+
+
+def plan_visual_scenes_if_enabled(
+    task_id: str,
+    params: VideoParams,
+    video_script: str,
+    audio_duration: float,
+):
+    """
+    Hook to generate structured semantic visual scenes when visual_engine is enabled.
+    Saves scene_plan.json into the task directory without affecting legacy stock retrieval.
+    """
+    if not _is_visual_engine_enabled(params):
+        return None
+
+    try:
+        from app.services.visual_engine import plan_scenes
+
+        logger.info("\n\n## planning visual scenes (semantic visual engine)")
+        result = plan_scenes(
+            video_script=video_script,
+            total_duration=audio_duration,
+            language=getattr(params, "video_language", ""),
+        )
+        plan_path = path.join(utils.task_dir(task_id), "scene_plan.json")
+        with open(plan_path, "w", encoding="utf-8") as f:
+            json.dump(result.model_dump(), f, indent=2, ensure_ascii=False)
+        logger.info(
+            f"saved scene plan ({len(result.scenes)} scenes, fallback={result.fallback_used}) to: {plan_path}"
+        )
+        return result
+    except Exception as exc:
+        logger.warning(f"visual scene planning failed non-fatally: {exc}")
+        return None
+
+
 def get_video_materials(
     task_id,
     params,
@@ -693,6 +742,45 @@ def get_video_materials(
             )
             return None
     else:
+        if _is_visual_engine_enabled(params):
+            logger.info("\n\n## acquiring video materials via Semantic Visual Engine")
+            try:
+                from app.services.visual_engine import acquire_scene_materials, plan_scenes
+                from app.services.visual_engine.schema import ScenePlanningResult
+
+                plan_file = path.join(utils.task_dir(task_id), "scene_plan.json")
+                scene_plan = None
+                if path.isfile(plan_file):
+                    try:
+                        with open(plan_file, "r", encoding="utf-8") as pf:
+                            scene_plan = ScenePlanningResult.model_validate_json(pf.read())
+                    except Exception:
+                        scene_plan = None
+
+                if not scene_plan:
+                    script_text = getattr(params, "video_script", "") or ""
+                    scene_plan = plan_scenes(
+                        video_script=script_text,
+                        total_duration=audio_duration,
+                        language=getattr(params, "video_language", ""),
+                    )
+
+                material_dir = config.app.get("material_directory", "").strip()
+                if material_dir == "task":
+                    material_dir = utils.task_dir(task_id)
+
+                engine_videos = acquire_scene_materials(
+                    task_id=task_id,
+                    scene_plan=scene_plan,
+                    video_aspect=params.video_aspect,
+                    material_directory=material_dir,
+                )
+                if engine_videos:
+                    return engine_videos
+                logger.warning("visual engine returned no video assets, falling back to legacy stock download")
+            except Exception as exc:
+                logger.warning(f"visual engine failed, falling back to legacy stock download: {exc}")
+
         logger.info(f"\n\n## downloading videos from {params.video_source}")
         # 顺序匹配模式只在用户显式开启时生效。这里强制素材下载按关键词顺序
         # 轮询，避免某个早期关键词下载太多素材，把后续脚本主题挤出最终时间线。
@@ -776,7 +864,7 @@ def generate_final_videos(
     )
     # 多视频生成默认会打散素材以增加差异；但“按文案顺序匹配素材”追求的是
     # 时间线稳定性和可解释性，所以开启后所有输出都使用顺序拼接。
-    if params.match_materials_to_script:
+    if params.match_materials_to_script or _is_visual_engine_enabled(params):
         video_concat_mode = VideoConcatMode.sequential
     elif params.video_count == 1:
         video_concat_mode = params.video_concat_mode
@@ -1352,6 +1440,9 @@ def _run_pipeline(
         return {"subtitle_path": subtitle_path}
 
     sm.state.update_task(task_id, state=const.TASK_STATE_PROCESSING, progress=40)
+
+    # Optional Semantic Scene Planning (isolated behind feature flag)
+    plan_visual_scenes_if_enabled(task_id, params, video_script, audio_duration)
 
     # 5. Get video materials
     downloaded_videos = get_video_materials(

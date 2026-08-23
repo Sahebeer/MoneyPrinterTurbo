@@ -75,6 +75,10 @@ REPLACEMENTS = {
         'upload_post_platforms = ["tiktok", "instagram"]',
     r'^upload_post_auto_upload = false$':
         lambda: 'upload_post_auto_upload = true' if env("UPLOAD_POST_API_KEY") else 'upload_post_auto_upload = false',
+    r'^hf_token = ""$':
+        lambda: f'hf_token = "{env("HF_TOKEN") or env("HUGGINGFACE_API_KEY")}"',
+    r'^enabled = false$':
+        lambda: 'enabled = true' if (env("VISUAL_ENGINE_ENABLED") == "true" or env("HF_TOKEN") or env("HUGGINGFACE_API_KEY")) else 'enabled = false',
 }
 
 

@@ -101,6 +101,7 @@ jobs:
           PIXABAY_API_KEY: ${{ secrets.PIXABAY_API_KEY }}
           UPLOAD_POST_API_KEY: ${{ secrets.UPLOAD_POST_API_KEY }}
           UPLOAD_POST_USERNAME: ${{ secrets.UPLOAD_POST_USERNAME }}
+          HF_TOKEN: ${{ secrets.HF_TOKEN }}
 
       - name: Select or Generate Unique Topic
         id: topic
@@ -142,6 +143,8 @@ jobs:
 
           echo "Running CLI with arguments: ${ARGS[@]}"
           uv run --no-sync python cli.py "${ARGS[@]}"
+        env:
+          HF_TOKEN: ${{ secrets.HF_TOKEN }}
 
       - name: Locate generated video
         id: video

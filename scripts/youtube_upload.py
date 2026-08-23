@@ -125,7 +125,7 @@ def upload_video(
     video_id = response.get("id")
     video_url = f"https://youtu.be/{video_id}"
     print("\n" + "=" * 60)
-    print(f" SUCCESS: Video uploaded to YouTube!")
+    print(" SUCCESS: Video uploaded to YouTube!")
     print(f" Video ID:  {video_id}")
     print(f" Video URL: {video_url}")
     print("=" * 60)
@@ -169,7 +169,50 @@ def main():
         except Exception as e:
             print(f"[!] Warning during video auto-detection: {e}", file=sys.stderr)
 
+    import json
+    import re
+
+    description = args.description.strip()
     tags = [t.strip() for t in args.tags.split(",") if t.strip()] if args.tags else []
+
+    # If description or tags are empty, discover from task.json or synthesize from topic
+    if not description or not tags:
+        task_dir = os.path.dirname(os.path.abspath(file_path))
+        task_json_path = os.path.join(task_dir, "task.json")
+        script_text = ""
+        subject_text = args.title or ""
+        if os.path.isfile(task_json_path):
+            try:
+                with open(task_json_path, "r", encoding="utf-8") as tf:
+                    tdata = json.load(tf)
+                script_text = tdata.get("script", "") or tdata.get("params", {}).get("video_script", "")
+                if not subject_text:
+                    subject_text = tdata.get("params", {}).get("video_subject", "")
+                task_terms = tdata.get("terms", []) or []
+                for term in task_terms:
+                    clean_term = re.sub(r"[^\w]", "", term).lower()
+                    if clean_term and clean_term not in tags:
+                        tags.append(clean_term)
+            except Exception:
+                pass
+
+        # Inject topic keywords as hashtags
+        if subject_text:
+            for word in re.findall(r"\b[A-Za-z]{3,}\b", subject_text):
+                w_clean = word.lower()
+                if w_clean not in tags and len(tags) < 15:
+                    tags.append(w_clean)
+
+        # Ensure top trending short tags
+        core_tags = ["shorts", "viral", "trending", "fyp"]
+        for ct in core_tags:
+            if ct not in tags:
+                tags.append(ct)
+
+        if not description:
+            topic_tags = " ".join(f"#{t}" for t in tags[:12])
+            desc_body = script_text or subject_text or "Check out this amazing short video!"
+            description = f"{desc_body}\n\n{topic_tags}"
 
     try:
         service = get_authenticated_service(args.client_id, args.client_secret, args.refresh_token)
@@ -177,7 +220,7 @@ def main():
             youtube=service,
             file_path=file_path,
             title=args.title,
-            description=args.description,
+            description=description,
             tags=tags,
             category_id=args.category_id,
             privacy_status=args.privacy,

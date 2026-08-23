@@ -1,5 +1,4 @@
 import json
-import logging
 import re
 import time
 from time import perf_counter

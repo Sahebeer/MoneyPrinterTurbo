@@ -481,3 +481,21 @@ open_task_folder_on_completion = true
 # subtitle_background_enabled = false
 # subtitle_background_color = "#000000"
 # rounded_subtitle_background = false
+
+# -----------------------------------------------------------------------------
+# Semantic Visual Engine / 语义视觉生成引擎
+# -----------------------------------------------------------------------------
+[visual_engine]
+# Enable semantic scene-by-scene visual planning
+enabled = false
+# Mode: "hybrid", "stock_only", "ai_only", "mock"
+mode = "hybrid"
+provider = "huggingface"
+model = "Wan-AI/Wan2.2-TI2V-5B"
+hf_token = ""
+stock_min_score = 65
+factual_min_score = 80
+prefer_i2v_for_factual = true
+max_ai_scenes_per_video = 6
+max_ai_attempts = 2
+cache_enabled = true
