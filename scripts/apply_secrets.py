@@ -57,6 +57,8 @@ REPLACEMENTS = {
         lambda: f'groq_api_key = "{env("GROQ_API_KEY")}"',
     r'^gemini_api_key = ""$':
         lambda: f'gemini_api_key = "{env("GEMINI_API_KEY")}"',
+    r'^gemini_model_name = ""$':
+        lambda: f'gemini_model_name = "{env("GEMINI_MODEL_NAME") or "gemini-2.5-flash"}"' if env("GEMINI_API_KEY") else 'gemini_model_name = ""',
     r'^openai_api_key = ""$':
         lambda: f'openai_api_key = "{env("OPENAI_API_KEY")}"',
     r'^deepseek_api_key = ""$':
