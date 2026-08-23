@@ -134,7 +134,7 @@ def upload_video(
 
 def main():
     parser = argparse.ArgumentParser(description="Upload video to YouTube via OAuth2")
-    parser.add_argument("--file", type=str, required=True, help="Path to video file")
+    parser.add_argument("--file", type=str, default="auto", help="Path to video file (or 'auto' to auto-detect)")
     parser.add_argument("--title", type=str, default="", help="Video title")
     parser.add_argument("--description", type=str, default="", help="Video description")
     parser.add_argument("--tags", type=str, default="", help="Comma-separated tags")
@@ -157,13 +157,25 @@ def main():
         print("Provide them via CLI or set YT_CLIENT_ID, YT_CLIENT_SECRET, and YT_REFRESH_TOKEN environment variables.", file=sys.stderr)
         sys.exit(1)
 
+    # Auto-resolve video path if requested or if file is missing/dir
+    file_path = args.file
+    if not file_path or file_path.lower() == "auto" or os.path.isdir(file_path) or not os.path.exists(file_path):
+        try:
+            from scripts.locate_video import locate_final_video
+            detected = locate_final_video()
+            if detected:
+                file_path = detected
+                print(f"[*] Auto-detected final video: {file_path}")
+        except Exception as e:
+            print(f"[!] Warning during video auto-detection: {e}", file=sys.stderr)
+
     tags = [t.strip() for t in args.tags.split(",") if t.strip()] if args.tags else []
 
     try:
         service = get_authenticated_service(args.client_id, args.client_secret, args.refresh_token)
         upload_video(
             youtube=service,
-            file_path=args.file,
+            file_path=file_path,
             title=args.title,
             description=args.description,
             tags=tags,

@@ -141,12 +141,12 @@ jobs:
       - name: Locate generated video
         id: video
         run: |
-          FILE=$(find storage -name "final-*.mp4" -o -name "*.mp4" 2>/dev/null | head -n 1)
+          FILE=$(uv run --no-sync python scripts/locate_video.py)
           if [ -z "$FILE" ]; then
-            echo "::error::No generated mp4 video found under storage/"
+            echo "::error::No generated final-*.mp4 video found under storage/"
             exit 1
           fi
-          echo "Found video: $FILE"
+          echo "Found final video: $FILE"
           echo "path=$FILE" >> "$GITHUB_OUTPUT"
 
       - name: Upload directly to YouTube
